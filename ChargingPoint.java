@@ -46,12 +46,12 @@ public class ChargingPoint implements Serializable {
 
     // Setters with validation
     public void setLat(double lat) {
-        validateRange(lat,0,300, "Latitude");
+        validateRange(lat, -90, 90, "Latitude");
         this.lat = lat;
     }
 
     public void setLon(double lon) {
-        validateRange(lon,0,300, "Longitude");
+        validateRange(lon, -180, 180, "Longitude");
         this.lon = lon;
     }
 
@@ -62,6 +62,21 @@ public class ChargingPoint implements Serializable {
     public void setPriceEurKwh(double priceEurKwh) {
         validatePositive(priceEurKwh, "Price per kWh");
         this.priceEurKwh = priceEurKwh;
+    }
+
+    public void setState(String state) {
+        if (isValidState(state)) {
+            // If setting to non-charging state, stop any active charging
+            if (!"CHARGING".equals(state) && "CHARGING".equals(this.state)) {
+                stopCharging();
+            }
+            this.state = state;
+            updateLastSeen();
+        }
+    }
+
+    public void setLastSeen(Timestamp lastSeen) {
+        this.lastSeen = Objects.requireNonNull(lastSeen, "Last seen timestamp cannot be null");
     }
 
     public void updateLastSeen() {
@@ -94,17 +109,6 @@ public class ChargingPoint implements Serializable {
         if ("CHARGING".equals(this.state) && connectedVehicleId != null) {
             this.totalEnergySuppliedKwh += energyKwh;
             this.currentChargingCost = this.totalEnergySuppliedKwh * this.priceEurKwh;
-            updateLastSeen();
-        }
-    }
-
-    public synchronized void setState(String newState) {
-        if (isValidState(newState)) {
-            // If setting to non-charging state, stop any active charging
-            if (!"CHARGING".equals(newState) && "CHARGING".equals(this.state)) {
-                stopCharging();
-            }
-            this.state = newState;
             updateLastSeen();
         }
     }
