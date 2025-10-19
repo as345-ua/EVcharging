@@ -1,0 +1,90 @@
+-- charging_points (MySQL)
+CREATE TABLE IF NOT EXISTS charging_points (
+  id            VARCHAR(64) PRIMARY KEY,
+  lat           DOUBLE,
+  lon           DOUBLE,
+  address       TEXT,
+  price_eur_kwh DECIMAL(6,4) DEFAULT 0.2500,
+  state         VARCHAR(20) NOT NULL, -- ACTIVADO, PARADO, SUMINISTRANDO, AVERIADO, DESCONECTADO
+  last_seen     TIMESTAMP NULL DEFAULT NULL,
+  metadata      JSON NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- drivers (no PII)
+CREATE TABLE IF NOT EXISTS drivers (
+  id            VARCHAR(64) PRIMARY KEY,
+  client_id     VARCHAR(64) UNIQUE,
+  registered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- sessions (a supply)
+CREATE TABLE IF NOT EXISTS sessions (
+  id         VARCHAR(64) PRIMARY KEY,
+  cp_id      VARCHAR(64) NOT NULL,
+  driver_id  VARCHAR(64) NULL,
+  start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  end_time   TIMESTAMP NULL DEFAULT NULL,
+  status     VARCHAR(20) NOT NULL, -- IN_PROGRESS, FINISHED, FAILED
+  total_kwh  DECIMAL(10,4) NULL,
+  total_eur  DECIMAL(10,2) NULL,
+  CONSTRAINT fk_sessions_cp FOREIGN KEY (cp_id) REFERENCES charging_points(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_sessions_driver FOREIGN KEY (driver_id) REFERENCES drivers(id) ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- session_samples (telemetry per second)
+CREATE TABLE IF NOT EXISTS session_samples (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  session_id     VARCHAR(64) NOT NULL,
+  ts             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  power_kw       DECIMAL(8,4) NULL,
+  cumulative_kwh DECIMAL(12,6) NULL,
+  payload        JSON NULL,
+  CONSTRAINT fk_samples_session FOREIGN KEY (session_id) REFERENCES sessions(id) ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- events_log (health, boots, etc)
+CREATE TABLE IF NOT EXISTS events_log (
+  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+  ts         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  source     VARCHAR(32) NULL,     -- CP, CENTRAL, MONITOR, DRIVER
+  cp_id      VARCHAR(64) NULL,
+  driver_id  VARCHAR(64) NULL,
+  event_type VARCHAR(64) NULL,
+  payload    JSON NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Indexes (basic)
+CREATE INDEX IF NOT EXISTS ix_cp_state ON charging_points(state);
+CREATE INDEX IF NOT EXISTS ix_cp_lastseen ON charging_points(last_seen);
+CREATE INDEX IF NOT EXISTS ix_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS ix_samples_session_ts ON session_samples(session_id, ts);
+CREATE INDEX IF NOT EXISTS ix_events_cp_ts ON events_log(cp_id, ts);
+
+drop table session_samples;
+drop table events_log;
+alter table charging_points drop column metadata;
+
+INSERT INTO charging_points (id, lat, lon, address, price_eur_kwh, state, last_seen) VALUES
+('CP_001', 40.7128, -74.0060, '123 Main Street, New York, NY', 0.32, 'AVAILABLE', CURRENT_TIMESTAMP),
+('CP_002', 34.0522, -118.2437, '456 Oak Avenue, Los Angeles, CA', 0.28, 'CHARGING', CURRENT_TIMESTAMP),
+('CP_003', 41.8781, -87.6298, '789 Lake Shore Drive, Chicago, IL', 0.30, 'AVAILABLE', CURRENT_TIMESTAMP),
+('CP_004', 29.7604, -95.3698, '321 Texas Street, Houston, TX', 0.26, 'OUT_OF_SERVICE', CURRENT_TIMESTAMP),
+('CP_005', 33.4484, -112.0740, '654 Desert Road, Phoenix, AZ', 0.29, 'AVAILABLE', CURRENT_TIMESTAMP),
+('CP_006', 39.7392, -104.9903, '987 Mountain View, Denver, CO', 0.31, 'BROKEN', CURRENT_TIMESTAMP),
+('CP_007', 25.7617, -80.1918, '147 Beach Boulevard, Miami, FL', 0.33, 'AVAILABLE', CURRENT_TIMESTAMP),
+('CP_008', 37.7749, -122.4194, '258 Golden Gate, San Francisco, CA', 0.35, 'CHARGING', CURRENT_TIMESTAMP),
+('CP_009', 47.6062, -122.3321, '369 Rainier Avenue, Seattle, WA', 0.27, 'AVAILABLE', CURRENT_TIMESTAMP),
+('CP_010', 42.3601, -71.0589, '753 Freedom Trail, Boston, MA', 0.34, 'DISCONNECTED', CURRENT_TIMESTAMP);
+
+-- Insert 10 drivers with different registration dates (for testing historical data)
+INSERT INTO drivers (id, client_id, registered_at) VALUES
+('DRIVER_001', 'CLIENT_001', '2024-01-15 10:30:00'),
+('DRIVER_002', 'CLIENT_002', '2024-02-20 14:45:00'),
+('DRIVER_003', 'CLIENT_003', '2024-03-10 09:15:00'),
+('DRIVER_004', 'CLIENT_004', '2024-04-05 16:20:00'),
+('DRIVER_005', 'CLIENT_005', '2024-05-12 11:00:00'),
+('DRIVER_006', 'CLIENT_006', '2024-06-18 13:30:00'),
+('DRIVER_007', 'CLIENT_007', '2024-07-22 08:45:00'),
+('DRIVER_008', 'CLIENT_008', '2024-08-30 15:10:00'),
+('DRIVER_009', 'CLIENT_009', '2024-09-14 12:25:00'),
+('DRIVER_010', 'CLIENT_010', '2024-10-08 17:40:00');
