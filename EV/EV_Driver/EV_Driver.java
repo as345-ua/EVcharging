@@ -6,6 +6,7 @@ import java.util.*;
 import java.io.*;
 import java.nio.file.*;
 import java.time.Duration;
+import java.util.concurrent.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 
@@ -14,11 +15,15 @@ public class EV_Driver {
     private final KafkaConsumer<String, String> consumer;
     private final String driverId;
     private final String servicesFile;
-    private String currentCpId = null;
     private final ObjectMapper objectMapper;
     private List<Map<String, Object>> users;
     private List<Map<String, Object>> chargingPoints;
     private final String basePath;
+    
+    // Para manejo concurrente
+    private final ExecutorService executor;
+    private final Map<String, String> activeSessions; // CP_ID -> Session data
+    private final CountDownLatch completionLatch;
 
     public EV_Driver(Properties producerProps, Properties consumerProps, String driverId, String servicesFile) {
         this.producer = new KafkaProducer<>(producerProps);
@@ -26,20 +31,18 @@ public class EV_Driver {
         this.driverId = driverId;
         this.servicesFile = servicesFile;
         this.objectMapper = new ObjectMapper();
+        this.executor = Executors.newCachedThreadPool();
+        this.activeSessions = new ConcurrentHashMap<>();
+        this.completionLatch = new CountDownLatch(1);
         
-        // Determinar la ruta base (subir dos niveles desde EV_Driver para llegar a EV)
         this.basePath = determineBasePath();
         
         System.out.println("Buscando archivos JSON en: " + basePath);
         
-        // Cargar datos de usuarios y puntos de carga
         this.users = loadUsers();
         this.chargingPoints = loadChargingPoints();
-        
-        // Validar que el driver existe
         validateDriver();
         
-        // Suscribirse a los topics relevantes
         this.consumer.subscribe(Arrays.asList(
             "charging-authorizations", 
             "charging-session-data", 
@@ -217,28 +220,52 @@ public class EV_Driver {
             return;
         }
 
-        // Iniciar hilo consumidor
-        Thread consumerThread = new Thread(this::consumeMessages);
-        consumerThread.setDaemon(true);
-        consumerThread.start();
+        // Iniciar consumidor en hilo separado
+        executor.submit(this::consumeMessages);
 
-        // Procesar cada servicio
-        for (String cpId : chargingPointsToUse) {
-            try {
-                processChargingService(cpId.trim());
-                // Esperar 4 segundos entre servicios (requisito punto 12)
-                Thread.sleep(4000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                System.err.println("Error procesando servicio para CP " + cpId + ": " + e.getMessage());
-            }
+        // Procesar servicios CONCURRENTEMENTE
+        processServicesConcurrently(chargingPointsToUse);
+
+        // Esperar a que todos los servicios terminen
+        try {
+            completionLatch.await(5, TimeUnit.MINUTES); // Timeout de 5 minutos
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
 
         System.out.println("\n=== Todos los servicios procesados ===");
-        producer.close();
-        consumer.wakeup();
+        shutdown();
+    }
+
+    private void processServicesConcurrently(List<String> chargingPointsToUse) {
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        
+        for (int i = 0; i < chargingPointsToUse.size(); i++) {
+            final String cpId = chargingPointsToUse.get(i).trim();
+            final int delaySeconds = i * 4; // Espaciar solicitudes cada 4 segundos
+            
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                try {
+                    // Esperar tiempo escalonado para evitar saturación
+                    if (delaySeconds > 0) {
+                        Thread.sleep(delaySeconds * 1000);
+                    }
+                    
+                    processChargingService(cpId);
+                    
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (Exception e) {
+                    System.err.println("Error procesando servicio para CP " + cpId + ": " + e.getMessage());
+                }
+            }, executor);
+            
+            futures.add(future);
+        }
+
+        // Esperar a que todas las solicitudes se completen
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+            .thenRun(() -> completionLatch.countDown());
     }
 
     private void showAvailableChargingPoints() {
@@ -321,9 +348,8 @@ public class EV_Driver {
     }
 
     private void processChargingService(String cpId) {
-        System.out.println("\n--- Solicitando carga en CP: " + cpId + " ---");
-        currentCpId = cpId;
-
+        System.out.println("\n[" + driverId + "] --- Solicitando carga en CP: " + cpId + " ---");
+        
         // Verificar estado del CP localmente (validación adicional)
         if (!chargingPoints.isEmpty()) {
             chargingPoints.stream()
@@ -332,27 +358,27 @@ public class EV_Driver {
                 .ifPresent(cp -> {
                     String state = cp.get("state").toString();
                     if (!"AVAILABLE".equals(state)) {
-                        System.out.println("  ADVERTENCIA: CP " + cpId + " está en estado: " + getStatusText(state));
+                        System.out.println("[" + driverId + "] ⚠️  ADVERTENCIA: CP " + cpId + " está en estado: " + getStatusText(state));
                     }
                 });
         }
 
-        // Enviar solicitud de carga a la central
+        // Enviar solicitud de carga
         String requestMessage = String.format("%s|%s|REQUEST|%s", 
-            driverId, cpId, new Date().getTime());
+            driverId, cpId, System.currentTimeMillis());
         
         ProducerRecord<String, String> record = new ProducerRecord<>(
             "charging-requests", 
-            cpId, 
+            driverId + "_" + cpId, // Key única por conductor+CP
             requestMessage
         );
 
         producer.send(record, (metadata, exception) -> {
             if (exception != null) {
-                System.err.println("Error enviando solicitud de carga: " + exception.getMessage());
+                System.err.println("[" + driverId + "] Error enviando solicitud de carga: " + exception.getMessage());
             } else {
-                System.out.println(" Solicitud de carga enviada para CP: " + cpId);
-                System.out.println("   Esperando autorización de la central...");
+                System.out.println("[" + driverId + "] ✅ Solicitud de carga enviada para CP: " + cpId);
+                System.out.println("[" + driverId + "]    Esperando autorización de la central...");
             }
         });
         producer.flush();
@@ -360,61 +386,76 @@ public class EV_Driver {
 
     private void consumeMessages() {
         try {
-            while (true) {
+            while (!Thread.currentThread().isInterrupted()) {
                 ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));
                 
                 for (ConsumerRecord<String, String> record : records) {
-                    String topic = record.topic();
-                    String key = record.key();
-                    String value = record.value();
-                    
-                    System.out.printf("\n[Mensaje recibido] Topic: %s | Key: %s | Value: %s%n", 
-                                     topic, key, value);
-
-                    // Procesar mensaje según el topic
-                    switch (topic) {
-                        case "charging-authorizations":
-                            handleAuthorizationMessage(key, value);
-                            break;
-                        case "charging-session-data":
-                            handleSessionData(key, value);
-                            break;
-                        case "session-end":
-                            handleSessionEnd(key, value);
-                            break;
-                        case "cp-status":
-                            handleCpStatus(key, value);
-                            break;
-                    }
+                    // Procesar cada mensaje en un hilo separado para mayor concurrencia
+                    executor.submit(() -> processMessage(record));
                 }
             }
         } catch (Exception e) {
             if (!(e.getCause() instanceof WakeupException)) {
-                System.err.println("Error en consumidor: " + e.getMessage());
+                System.err.println("[" + driverId + "] Error en consumidor: " + e.getMessage());
             }
         } finally {
             consumer.close();
         }
     }
 
+    private void processMessage(ConsumerRecord<String, String> record) {
+        String topic = record.topic();
+        String key = record.key();
+        String value = record.value();
+        
+        System.out.printf("\n[%s][Mensaje] Topic: %s | Key: %s | Value: %s%n", 
+                         driverId, topic, key, value);
+
+        // Filtrar mensajes que son para este conductor específico
+        if (key != null && key.startsWith(driverId + "_")) {
+            String cpId = key.replace(driverId + "_", "");
+            switch (topic) {
+                case "charging-authorizations":
+                    handleAuthorizationMessage(cpId, value);
+                    break;
+                case "charging-session-data":
+                    handleSessionData(cpId, value);
+                    break;
+                case "session-end":
+                    handleSessionEnd(cpId, value);
+                    break;
+            }
+        }
+        
+        // Los mensajes de estado de CP son para todos los conductores
+        if ("cp-status".equals(topic)) {
+            handleCpStatus(key, value);
+        }
+    }
+
     private void handleAuthorizationMessage(String cpId, String message) {
-        System.out.println("\n--- AUTORIZACIÓN RECIBIDA ---");
-        System.out.println("CP: " + cpId + " | Mensaje: " + message);
+        System.out.println("\n[" + driverId + "] --- AUTORIZACIÓN RECIBIDA ---");
+        System.out.println("[" + driverId + "] CP: " + cpId + " | Mensaje: " + message);
         
         if (message.contains("AUTHORIZED") || message.contains("autorizado") || message.contains("APPROVED")) {
-            System.out.println("CARGA AUTORIZADA");
-            System.out.println("Proceder a conectar vehículo al CP " + cpId);
+            System.out.println("[" + driverId + "] ✅ ✅ ✅ CARGA AUTORIZADA ✅ ✅ ✅");
+            System.out.println("[" + driverId + "] Proceder a conectar vehículo al CP " + cpId);
+            
+            // Marcar sesión como activa
+            activeSessions.put(cpId, "AUTHORIZED");
         } else if (message.contains("DENIED") || message.contains("denegado") || message.contains("REJECTED")) {
-            System.out.println("CARGA DENEGADA");
-            System.out.println("Motivo: " + message);
+            System.out.println("[" + driverId + "] ❌ ❌ ❌ CARGA DENEGADA ❌ ❌ ❌");
+            System.out.println("[" + driverId + "] Motivo: " + message);
+            
+            // Remover sesión denegada
+            activeSessions.remove(cpId);
         } else {
-            System.out.println(" Estado de autorización: " + message);
+            System.out.println("[" + driverId + "] 📋 Estado de autorización: " + message);
         }
     }
 
     private void handleSessionData(String cpId, String data) {
-        // Mostrar datos en tiempo real de la sesión de carga
-        System.out.println(" [CP " + cpId + "] Datos de carga: " + data);
+        System.out.println("[" + driverId + "] 📊 [CP " + cpId + "] Datos de carga: " + data);
         
         // Parsear datos de la sesión
         String[] parts = data.split("\\|");
@@ -424,33 +465,47 @@ public class EV_Driver {
                 double energy = Double.parseDouble(parts[2]);
                 double cost = Double.parseDouble(parts[3]);
                 
-                System.out.printf("    Potencia: %.1f kW |  Energía: %.1f kWh |  Coste: %.2f €%n", 
-                    power, energy, cost);
+                System.out.printf("[%s]    ⚡ Potencia: %.1f kW | 🔋 Energía: %.1f kWh | 💰 Coste: %.2f €%n", 
+                    driverId, power, energy, cost);
             } catch (NumberFormatException e) {
-                System.out.println("   " + data);
+                System.out.println("[" + driverId + "]    " + data);
             }
         }
     }
 
     private void handleSessionEnd(String cpId, String message) {
-        System.out.println("\n--- FIN DE SESIÓN ---");
-        System.out.println("CP: " + cpId);
-        System.out.println(" Ticket final: " + message);
-        currentCpId = null;
+        System.out.println("\n[" + driverId + "] --- FIN DE SESIÓN ---");
+        System.out.println("[" + driverId + "] CP: " + cpId);
+        System.out.println("[" + driverId + "] 🎫 Ticket final: " + message);
         
-        // Parsear ticket final si está en formato estructurado
+        // Remover sesión terminada
+        activeSessions.remove(cpId);
+        
         if (message.contains("|")) {
             String[] parts = message.split("\\|");
             if (parts.length >= 4) {
-                System.out.printf("    Energía total: %s kWh%n", parts[1]);
-                System.out.printf("    Coste total: %s €%n", parts[2]);
-                System.out.printf("    Tiempo de carga: %s%n", parts[3]);
+                System.out.printf("[%s]    🔋 Energía total: %s kWh%n", driverId, parts[1]);
+                System.out.printf("[%s]    💰 Coste total: %s €%n", driverId, parts[2]);
+                System.out.printf("[%s]    ⏱️  Tiempo de carga: %s%n", driverId, parts[3]);
             }
         }
     }
 
     private void handleCpStatus(String cpId, String status) {
-        // Mostrar estado actualizado de los CPs
-        System.out.println(" [CP " + cpId + "] Estado actualizado: " + status);
+        System.out.println("[" + driverId + "] 🔧 [CP " + cpId + "] Estado actualizado: " + status);
+    }
+
+    private void shutdown() {
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        producer.close();
+        consumer.wakeup();
     }
 }
