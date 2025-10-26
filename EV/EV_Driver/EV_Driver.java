@@ -201,8 +201,8 @@ public class EV_Driver {
             .filter(user -> driverId.equals(user.get("id").toString()))
             .findFirst()
             .ifPresent(user -> {
-                System.out.println("🚗 Conductor: " + user.get("name") + " (ID: " + user.get("id") + ")");
-                System.out.println("📧 Email: " + user.get("gmail"));
+                System.out.println(" Conductor: " + user.get("name") + " (ID: " + user.get("id") + ")");
+                System.out.println(" Email: " + user.get("gmail"));
             });
     }
 
@@ -358,7 +358,7 @@ public class EV_Driver {
                 .ifPresent(cp -> {
                     String state = cp.get("state").toString();
                     if (!"AVAILABLE".equals(state)) {
-                        System.out.println("[" + driverId + "] ⚠️  ADVERTENCIA: CP " + cpId + " está en estado: " + getStatusText(state));
+                        System.out.println("[" + driverId + "]   ADVERTENCIA: CP " + cpId + " está en estado: " + getStatusText(state));
                     }
                 });
         }
@@ -377,7 +377,7 @@ public class EV_Driver {
             if (exception != null) {
                 System.err.println("[" + driverId + "] Error enviando solicitud de carga: " + exception.getMessage());
             } else {
-                System.out.println("[" + driverId + "] ✅ Solicitud de carga enviada para CP: " + cpId);
+                System.out.println("[" + driverId + "]  Solicitud de carga enviada para CP: " + cpId);
                 System.out.println("[" + driverId + "]    Esperando autorización de la central...");
             }
         });
@@ -438,24 +438,24 @@ public class EV_Driver {
         System.out.println("[" + driverId + "] CP: " + cpId + " | Mensaje: " + message);
         
         if (message.contains("AUTHORIZED") || message.contains("autorizado") || message.contains("APPROVED")) {
-            System.out.println("[" + driverId + "] ✅ ✅ ✅ CARGA AUTORIZADA ✅ ✅ ✅");
+            System.out.println("[" + driverId + "]    CARGA AUTORIZADA   ");
             System.out.println("[" + driverId + "] Proceder a conectar vehículo al CP " + cpId);
             
             // Marcar sesión como activa
             activeSessions.put(cpId, "AUTHORIZED");
         } else if (message.contains("DENIED") || message.contains("denegado") || message.contains("REJECTED")) {
-            System.out.println("[" + driverId + "] ❌ ❌ ❌ CARGA DENEGADA ❌ ❌ ❌");
+            System.out.println("[" + driverId + "]    CARGA DENEGADA   ");
             System.out.println("[" + driverId + "] Motivo: " + message);
             
             // Remover sesión denegada
             activeSessions.remove(cpId);
         } else {
-            System.out.println("[" + driverId + "] 📋 Estado de autorización: " + message);
+            System.out.println("[" + driverId + "]  Estado de autorización: " + message);
         }
     }
 
     private void handleSessionData(String cpId, String data) {
-        System.out.println("[" + driverId + "] 📊 [CP " + cpId + "] Datos de carga: " + data);
+        System.out.println("[" + driverId + "]  [CP " + cpId + "] Datos de carga: " + data);
         
         // Parsear datos de la sesión
         String[] parts = data.split("\\|");
@@ -465,7 +465,7 @@ public class EV_Driver {
                 double energy = Double.parseDouble(parts[2]);
                 double cost = Double.parseDouble(parts[3]);
                 
-                System.out.printf("[%s]    ⚡ Potencia: %.1f kW | 🔋 Energía: %.1f kWh | 💰 Coste: %.2f €%n", 
+                System.out.printf("[%s]     Potencia: %.1f kW |  Energía: %.1f kWh |  Coste: %.2f €%n", 
                     driverId, power, energy, cost);
             } catch (NumberFormatException e) {
                 System.out.println("[" + driverId + "]    " + data);
@@ -476,7 +476,7 @@ public class EV_Driver {
     private void handleSessionEnd(String cpId, String message) {
         System.out.println("\n[" + driverId + "] --- FIN DE SESIÓN ---");
         System.out.println("[" + driverId + "] CP: " + cpId);
-        System.out.println("[" + driverId + "] 🎫 Ticket final: " + message);
+        System.out.println("[" + driverId + "]  Ticket final: " + message);
         
         // Remover sesión terminada
         activeSessions.remove(cpId);
@@ -484,15 +484,15 @@ public class EV_Driver {
         if (message.contains("|")) {
             String[] parts = message.split("\\|");
             if (parts.length >= 4) {
-                System.out.printf("[%s]    🔋 Energía total: %s kWh%n", driverId, parts[1]);
-                System.out.printf("[%s]    💰 Coste total: %s €%n", driverId, parts[2]);
-                System.out.printf("[%s]    ⏱️  Tiempo de carga: %s%n", driverId, parts[3]);
+                System.out.printf("[%s]     Energía total: %s kWh%n", driverId, parts[1]);
+                System.out.printf("[%s]     Coste total: %s €%n", driverId, parts[2]);
+                System.out.printf("[%s]     Tiempo de carga: %s%n", driverId, parts[3]);
             }
         }
     }
 
     private void handleCpStatus(String cpId, String status) {
-        System.out.println("[" + driverId + "] 🔧 [CP " + cpId + "] Estado actualizado: " + status);
+        System.out.println("[" + driverId + "]  [CP " + cpId + "] Estado actualizado: " + status);
     }
 
     private void shutdown() {
