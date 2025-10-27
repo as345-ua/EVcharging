@@ -1,19 +1,5 @@
-Productor    → Nombre del topic        → Consumidor/es             
-----------------------------------------------------------------
-EV_Driver    → charging-requests       → EV_Central
-EV_Central   → charging-authorizations → EV_Driver / EV_CP_E
-EV_CP_E      → charging-session-data   → EV_Central / EV_Driver
-EV_CP_M      → cp-health               → EV_Central
-EV_CP_M      → cp-status               → EV_Central
-EV_Central   → central-commands        → EV_CP_E / EV_CP_M
-EV_CP_M      → cp-registration         → EV_Central
-EV_CP_E      → session-end             → EV_Central / EV_Driver
-
-cp-registration: Para el registro de nuevos puntos de carga en la central.
-cp-status: Para enviar el estado actual del CP (Activado, Parado, Suministrando, Averiado, Desconectado).
-charging-requests: Para solicitudes de carga desde conductores o desde el menú del CP.
-charging-authorizations: Para autorizaciones o denegaciones de carga desde la central.
-charging-session-data: Para enviar datos en tiempo real durante una sesión de carga (consumo, importe, etc.).
-cp-health: Para reportar el estado de salud del CP (funcionamiento o avería).
-central-commands: Para enviar comandos desde la central a los CPs (Parar, Reanudar).
-session-end: Para notificar el fin de una sesión de carga y enviar el ticket.
+driver hace [driver-request], central lo recibe (pregunta si puede cargar y central lo comprueba)
+central manda [charging-order] a punto de carga (ordena a la estacion de carga que cargue al driver, como ya conoce los charging points ya sabe cuáles están operativos)
+central manda [driver-reply] a driver(con el punto de carga al que tiene acceso o que no lo tiene) 
+cuando termina de cargar, charging point manda mensaje [session-end] a central
+finalmente terminal le manda [factura] a driver
