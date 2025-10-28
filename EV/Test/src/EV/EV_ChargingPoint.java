@@ -12,12 +12,18 @@ public class EV_ChargingPoint {
     private String serverHost;
     private int serverPort;
     private boolean connected;
+    private boolean isCharging;
+    private String currentVehicleId;
+    private double currentEnergyKwh;
+    private Thread chargingThread;
     
     public EV_ChargingPoint(String serverHost, int serverPort, String cpId) {
         this.serverHost = serverHost;
         this.serverPort = serverPort;
         this.cpId = cpId;
         this.connected = false;
+        this.isCharging = false;
+        this.currentEnergyKwh = 0.0;
     }
     
     /**
@@ -44,7 +50,7 @@ public class EV_ChargingPoint {
             if (response != null && response.startsWith("SUCCESS")) {
                 connected = true;
                 System.out.println("✅ Authentication SUCCESSFUL!");
-                System.out.println("🟢 Charging Point " + cpId + " is now ONLINE\n");
+                System.out.println("🟢 Charging Point " + cpId + " is now AVAILABLE\n");
                 return true;
             } else {
                 System.err.println("❌ Authentication FAILED!");
@@ -73,7 +79,7 @@ public class EV_ChargingPoint {
     public void sendMessage(String message) {
         if (connected && out != null) {
             out.println(message);
-            System.out.println("📤 Sent: " + message);
+            System.out.println("📤 Sent to Central: " + message);
         } else {
             System.err.println("❌ Not connected to server");
         }
@@ -87,11 +93,12 @@ public class EV_ChargingPoint {
             try {
                 String message;
                 while (connected && (message = in.readLine()) != null) {
-                    System.out.println("📩 Received from Central: " + message);
+                    System.out.println("\n📩 Response from Central: " + message);
+                    System.out.print("\nChoose option: "); // Re-prompt after message
                 }
             } catch (IOException e) {
                 if (connected) {
-                    System.err.println("❌ Connection lost to Central");
+                    System.err.println("\n❌ Connection lost to Central");
                     connected = false;
                 }
             }
@@ -101,57 +108,145 @@ public class EV_ChargingPoint {
     }
     
     /**
+     * Start charging simulation - sends updates every second
+     */
+    private void startChargingSimulation(String vehicleId, double powerKw) {
+        isCharging = true;
+        currentVehicleId = vehicleId;
+        currentEnergyKwh = 0.0;
+        
+        chargingThread = new Thread(() -> {
+            System.out.println("\n⚡ CHARGING STARTED");
+            System.out.println("   Vehicle: " + vehicleId);
+            System.out.println("   Power: " + powerKw + " kW");
+            System.out.println("   Sending updates to Central every 1 second...\n");
+            
+            while (isCharging) {
+                try {
+                    Thread.sleep(1000); // Wait 1 second
+                    
+                    // Calculate energy (power * time in hours)
+                    currentEnergyKwh += powerKw / 3600.0; // Convert seconds to hours
+                    
+                    // Send update to Central
+                    sendMessage("UPDATE_CHARGING#" + String.format("%.4f", currentEnergyKwh));
+                    
+                    System.out.printf("⚡ Charging in progress... %.4f kWh delivered%n", currentEnergyKwh);
+                    
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        });
+        chargingThread.start();
+    }
+    
+    /**
+     * Stop charging simulation
+     */
+    private void stopChargingSimulation() {
+        if (isCharging) {
+            isCharging = false;
+            if (chargingThread != null) {
+                chargingThread.interrupt();
+            }
+            System.out.println("\n🛑 CHARGING STOPPED");
+            System.out.printf("   Total energy delivered: %.4f kWh%n", currentEnergyKwh);
+            currentVehicleId = null;
+            currentEnergyKwh = 0.0;
+        }
+    }
+    
+    /**
      * Interactive menu for testing
      */
     public void runInteractiveMenu() {
         Scanner scanner = new Scanner(System.in);
         
         while (connected) {
-            System.out.println("\n========== CHARGING POINT MENU ==========");
-            System.out.println("1. Send STATUS request");
-            System.out.println("2. Send HEARTBEAT");
-            System.out.println("3. Start charging (simulate)");
-            System.out.println("4. Stop charging");
-            System.out.println("5. Disconnect");
-            System.out.println("=========================================");
-            System.out.print("Choose option: ");
+            System.out.println("\n╔═══════════════════════════════════════════════════╗");
+            System.out.println("║       CHARGING POINT CONTROL PANEL - CP " + cpId + "        ║");
+            System.out.println("╚═══════════════════════════════════════════════════╝");
+            System.out.println("Current Status: " + (isCharging ? "🔵 CHARGING (Vehicle: " + currentVehicleId + ")" : "🟢 AVAILABLE"));
+            System.out.println("─────────────────────────────────────────────────────");
+            System.out.println("┌─ CHARGING OPERATIONS ─────────────────────────────┐");
+            System.out.println("│ 1. ⚡ Start charging (plug vehicle)               │");
+            System.out.println("│ 2. 🛑 Stop charging (unplug vehicle)              │");
+            System.out.println("│ 3. 💓 Send heartbeat to Central                   │");
+            System.out.println("└───────────────────────────────────────────────────┘");
+            System.out.println("┌─ CONFIGURATION CHANGES ───────────────────────────┐");
+            System.out.println("│ 4. 📍 Update position (X, Y coordinates)          │");
+            System.out.println("│ 5. 💰 Update price (€/kWh)                        │");
+            System.out.println("│ 6. 🔧 Change state (AVAILABLE/OUT_OF_SERVICE/etc) │");
+            System.out.println("│ 7. 📝 Update status field                         │");
+            System.out.println("└───────────────────────────────────────────────────┘");
+            System.out.println("┌─ INFORMATION & CONTROL ───────────────────────────┐");
+            System.out.println("│ 8. 📊 Request current status from Central         │");
+            System.out.println("│ 9. ❌ Simulate fault/breakdown                     │");
+            System.out.println("│ 10. 🔌 Disconnect from Central                    │");
+            System.out.println("└───────────────────────────────────────────────────┘");
+            System.out.print("\nChoose option: ");
             
             String choice = scanner.nextLine().trim();
             
             switch (choice) {
                 case "1":
-                    sendMessage("STATUS");
+                    handleStartCharging(scanner);
                     break;
                     
                 case "2":
-                    sendMessage("HEARTBEAT");
+                    handleStopCharging();
                     break;
                     
                 case "3":
-                    System.out.print("Enter vehicle ID: ");
-                    String vehicleId = scanner.nextLine().trim();
-                    if (!vehicleId.isEmpty()) {
-                        sendMessage("START_CHARGING#" + vehicleId);
-                    }
+                    System.out.println("\n💓 Sending heartbeat...");
+                    sendMessage("HEARTBEAT");
                     break;
                     
                 case "4":
-                    sendMessage("STOP_CHARGING");
+                    handleUpdatePosition(scanner);
                     break;
                     
                 case "5":
-                    System.out.println("👋 Disconnecting...");
+                    handleUpdatePrice(scanner);
+                    break;
+                    
+                case "6":
+                    handleChangeState(scanner);
+                    break;
+                    
+                case "7":
+                    handleUpdateStatus(scanner);
+                    break;
+                    
+                case "8":
+                    System.out.println("\n📊 Requesting status from Central...");
+                    sendMessage("STATUS");
+                    break;
+                    
+                case "9":
+                    handleSimulateFault(scanner);
+                    break;
+                    
+                case "10":
+                    System.out.println("\n👋 Disconnecting from Central...");
+                    if (isCharging) {
+                        stopChargingSimulation();
+                        sendMessage("STOP_CHARGING");
+                    }
                     disconnect();
+                    scanner.close();
                     return;
                     
                 default:
-                    System.out.println("❌ Invalid option");
+                    System.out.println("\n❌ Invalid option! Please choose 1-10.");
                     break;
             }
             
             // Small delay to see server response
             try {
-                Thread.sleep(500);
+                Thread.sleep(300);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -161,10 +256,251 @@ public class EV_ChargingPoint {
     }
     
     /**
+     * Handle start charging option
+     */
+    private void handleStartCharging(Scanner scanner) {
+        if (isCharging) {
+            System.out.println("\n❌ Already charging! Stop current session first.");
+            return;
+        }
+        
+        System.out.println("\n⚡ START CHARGING SESSION");
+        System.out.println("─────────────────────────");
+        System.out.print("Enter vehicle ID (e.g., VEH-001, VEH-2050): ");
+        String vehicleId = scanner.nextLine().trim();
+        
+        if (vehicleId.isEmpty()) {
+            System.out.println("❌ Vehicle ID cannot be empty!");
+            return;
+        }
+        
+        System.out.print("Enter charging power in kW (e.g., 22, 50, 120): ");
+        String powerStr = scanner.nextLine().trim();
+        
+        if (powerStr.isEmpty()) {
+            System.out.println("❌ Power cannot be empty!");
+            return;
+        }
+        
+        try {
+            double powerKw = Double.parseDouble(powerStr);
+            
+            if (powerKw <= 0) {
+                System.out.println("❌ Power must be greater than 0!");
+                return;
+            }
+            
+            System.out.println("\n✅ Sending START_CHARGING command to Central...");
+            
+            // Send START_CHARGING to Central
+            sendMessage("START_CHARGING#" + vehicleId + "#" + powerKw);
+            
+            // Start local simulation
+            startChargingSimulation(vehicleId, powerKw);
+            
+        } catch (NumberFormatException e) {
+            System.out.println("❌ Invalid power value! Must be a number.");
+        }
+    }
+    
+    /**
+     * Handle stop charging option
+     */
+    private void handleStopCharging() {
+        if (!isCharging) {
+            System.out.println("\n❌ Not charging! Start a charging session first.");
+            return;
+        }
+        
+        System.out.println("\n🛑 STOPPING CHARGING SESSION");
+        System.out.println("─────────────────────────────");
+        
+        // Stop local simulation
+        stopChargingSimulation();
+        
+        // Send STOP_CHARGING to Central
+        System.out.println("✅ Sending STOP_CHARGING command to Central...");
+        sendMessage("STOP_CHARGING");
+    }
+    
+    /**
+     * Handle update position option
+     */
+    private void handleUpdatePosition(Scanner scanner) {
+        System.out.println("\n📍 UPDATE POSITION");
+        System.out.println("──────────────────");
+        System.out.print("Enter new X coordinate: ");
+        String xStr = scanner.nextLine().trim();
+        
+        System.out.print("Enter new Y coordinate: ");
+        String yStr = scanner.nextLine().trim();
+        
+        if (xStr.isEmpty() || yStr.isEmpty()) {
+            System.out.println("❌ Coordinates cannot be empty!");
+            return;
+        }
+        
+        try {
+            double x = Double.parseDouble(xStr);
+            double y = Double.parseDouble(yStr);
+            
+            System.out.println("\n✅ Sending position update to Central...");
+            System.out.printf("   New position: (%.2f, %.2f)%n", x, y);
+            sendMessage("UPDATE_POSITION#" + x + "#" + y);
+            
+        } catch (NumberFormatException e) {
+            System.out.println("❌ Invalid coordinate values! Must be numbers.");
+        }
+    }
+    
+    /**
+     * Handle update price option
+     */
+    private void handleUpdatePrice(Scanner scanner) {
+        System.out.println("\n💰 UPDATE PRICE");
+        System.out.println("───────────────");
+        System.out.print("Enter new price (€/kWh, e.g., 0.35, 0.45): ");
+        String priceStr = scanner.nextLine().trim();
+        
+        if (priceStr.isEmpty()) {
+            System.out.println("❌ Price cannot be empty!");
+            return;
+        }
+        
+        try {
+            double price = Double.parseDouble(priceStr);
+            
+            if (price < 0) {
+                System.out.println("❌ Price cannot be negative!");
+                return;
+            }
+            
+            System.out.println("\n✅ Sending price update to Central...");
+            System.out.printf("   New price: €%.2f/kWh%n", price);
+            sendMessage("UPDATE_PRICE#" + price);
+            
+        } catch (NumberFormatException e) {
+            System.out.println("❌ Invalid price value! Must be a number.");
+        }
+    }
+    
+    /**
+     * Handle change state option
+     */
+    private void handleChangeState(Scanner scanner) {
+        System.out.println("\n🔧 CHANGE STATE");
+        System.out.println("───────────────");
+        System.out.println("Available states:");
+        System.out.println("  1. AVAILABLE       - Ready for charging");
+        System.out.println("  2. OUT_OF_SERVICE  - Temporarily disabled");
+        System.out.println("  3. BROKEN          - Hardware failure");
+        System.out.println("  4. CHARGING        - Currently charging (automatic)");
+        System.out.println("  5. DISCONNECTED    - Not connected (automatic)");
+        System.out.print("\nEnter new state (type name or number): ");
+        String input = scanner.nextLine().trim().toUpperCase();
+        
+        if (input.isEmpty()) {
+            System.out.println("❌ State cannot be empty!");
+            return;
+        }
+        
+        String state;
+        switch (input) {
+            case "1":
+            case "AVAILABLE":
+                state = "AVAILABLE";
+                break;
+            case "2":
+            case "OUT_OF_SERVICE":
+                state = "OUT_OF_SERVICE";
+                break;
+            case "3":
+            case "BROKEN":
+                state = "BROKEN";
+                break;
+            case "4":
+            case "CHARGING":
+                state = "CHARGING";
+                break;
+            case "5":
+            case "DISCONNECTED":
+                state = "DISCONNECTED";
+                break;
+            default:
+                System.out.println("❌ Invalid state! Use one of the listed options.");
+                return;
+        }
+        
+        System.out.println("\n✅ Sending state change to Central...");
+        System.out.println("   New state: " + state);
+        sendMessage("SET_STATE#" + state);
+    }
+    
+    /**
+     * Handle update status option
+     */
+    private void handleUpdateStatus(Scanner scanner) {
+        System.out.println("\n📝 UPDATE STATUS FIELD");
+        System.out.println("──────────────────────");
+        System.out.println("Current examples: Active, working, Damaged, offline");
+        System.out.print("Enter new status description: ");
+        String status = scanner.nextLine().trim();
+        
+        if (status.isEmpty()) {
+            System.out.println("❌ Status cannot be empty!");
+            return;
+        }
+        
+        System.out.println("\n✅ Sending status update to Central...");
+        System.out.println("   New status: " + status);
+        sendMessage("UPDATE_STATUS#" + status);
+    }
+    
+    /**
+     * Handle simulate fault option
+     */
+    private void handleSimulateFault(Scanner scanner) {
+        System.out.println("\n❌ SIMULATE FAULT/BREAKDOWN");
+        System.out.println("───────────────────────────");
+        System.out.println("This will:");
+        System.out.println("  • Stop any active charging session");
+        System.out.println("  • Set state to BROKEN");
+        System.out.println("  • Update database");
+        System.out.print("\nAre you sure? (yes/no): ");
+        
+        String confirm = scanner.nextLine().trim().toLowerCase();
+        
+        if (confirm.equals("yes") || confirm.equals("y")) {
+            System.out.println("\n🚨 Simulating fault...");
+            
+            // If charging, stop it
+            if (isCharging) {
+                stopChargingSimulation();
+                sendMessage("STOP_CHARGING");
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            
+            // Set state to BROKEN
+            System.out.println("🔴 Setting state to BROKEN...");
+            sendMessage("SET_STATE#BROKEN");
+            
+        } else {
+            System.out.println("❌ Fault simulation cancelled.");
+        }
+    }
+    
+    /**
      * Disconnect from Central
      */
     public void disconnect() {
         connected = false;
+        if (isCharging) {
+            stopChargingSimulation();
+        }
         try {
             if (socket != null && !socket.isClosed()) {
                 socket.close();

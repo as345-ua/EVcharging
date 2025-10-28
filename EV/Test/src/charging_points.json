@@ -2,14 +2,13 @@
   {
     "id": "1",
     "status": "Active",
-    "posX": 12.5,
-    "posY": 7.8,
+    "posX": 0.0,
+    "posY": 0.0,
     "priceEurKwh": 0.35,
-    "state": "AVAILABLE",
-    "lastSeen": "2025-10-20T10:15:30Z",
-    "connectedVehicleId": null,
+    "state": "DISCONNECTED",
+    "lastSeen": "Wed Oct 29 00:52:57 CET 2025",
     "currentPowerKw": 0.0,
-    "totalEnergySuppliedKwh": 1250.5,
+    "totalEnergySuppliedKwh": 0.0,
     "currentChargingCost": 0.0
   },
   {
@@ -18,22 +17,20 @@
     "posX": 13.0,
     "posY": 8.0,
     "priceEurKwh": 0.37,
-    "state": "CHARGING",
     "lastSeen": "2025-10-20T11:05:10Z",
     "connectedVehicleId": "VEH-2001",
     "currentPowerKw": 50.0,
     "totalEnergySuppliedKwh": 890.75,
-    "currentChargingCost": 3.70
+    "currentChargingCost": 3.7
   },
   {
     "id": "3",
     "status": "Damaged",
     "posX": 9.2,
     "posY": 5.1,
-    "priceEurKwh": 0.30,
+    "priceEurKwh": 0.3,
     "state": "BROKEN",
     "lastSeen": "2025-09-30T09:00:00Z",
-    "connectedVehicleId": null,
     "currentPowerKw": 0.0,
     "totalEnergySuppliedKwh": 300.0,
     "currentChargingCost": 0.0
@@ -43,10 +40,9 @@
     "status": "offline",
     "posX": 14.5,
     "posY": 3.3,
-    "priceEurKwh": 0.40,
+    "priceEurKwh": 0.4,
     "state": "DISCONNECTED",
     "lastSeen": "2025-10-20T08:00:00Z",
-    "connectedVehicleId": null,
     "currentPowerKw": 0.0,
     "totalEnergySuppliedKwh": 542.3,
     "currentChargingCost": 0.0
@@ -72,7 +68,6 @@
     "priceEurKwh": 0.29,
     "state": "AVAILABLE",
     "lastSeen": "2025-10-20T12:30:00Z",
-    "connectedVehicleId": null,
     "currentPowerKw": 0.0,
     "totalEnergySuppliedKwh": 50.0,
     "currentChargingCost": 0.0
@@ -85,7 +80,6 @@
     "priceEurKwh": 0.45,
     "state": "OUT_OF_SERVICE",
     "lastSeen": "2025-10-19T18:22:05Z",
-    "connectedVehicleId": null,
     "currentPowerKw": 0.0,
     "totalEnergySuppliedKwh": 1200.0,
     "currentChargingCost": 0.0
@@ -98,7 +92,6 @@
     "priceEurKwh": 0.31,
     "state": "BROKEN",
     "lastSeen": "2025-10-15T07:10:00Z",
-    "connectedVehicleId": null,
     "currentPowerKw": 0.0,
     "totalEnergySuppliedKwh": 78.4,
     "currentChargingCost": 0.0
@@ -111,7 +104,6 @@
     "priceEurKwh": 0.34,
     "state": "DISCONNECTED",
     "lastSeen": "2025-10-20T00:05:00Z",
-    "connectedVehicleId": null,
     "currentPowerKw": 0.0,
     "totalEnergySuppliedKwh": 987.9,
     "currentChargingCost": 0.0
@@ -127,6 +119,6 @@
     "connectedVehicleId": "VEH-3010",
     "currentPowerKw": 120.0,
     "totalEnergySuppliedKwh": 2300.0,
-    "currentChargingCost": 10.80
+    "currentChargingCost": 10.8
   }
 ]
