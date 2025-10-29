@@ -3,9 +3,14 @@ package EV;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
+import org.apache.kafka.clients.consumer.*;
+import org.apache.kafka.clients.producer.*;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import java.net.*;
 import java.io.*;
 import java.lang.reflect.Type;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -33,11 +38,28 @@ public class EV_Central {
     private String jsonFilePath;
     private String driversJsonFilePath;
     
-    public EV_Central(int port, String jsonFilePath) {
+    // Kafka
+    private String kafkaBootstrapServers;
+    private KafkaProducer<String, String> kafkaProducer;
+    private KafkaConsumer<String, String> kafkaConsumer;
+    private Thread kafkaConsumerThread;
+    
+    // Kafka Topics
+    private static final String TOPIC_REQUESTS = "charging.requests";
+    private static final String TOPIC_AUTHORIZATIONS = "charging.authorizations";
+    private static final String TOPIC_TELEMETRY = "charging.telemetry";
+    private static final String TOPIC_NOTIFICATIONS = "charging.notifications";
+    private static final String TOPIC_CP_STATUS = "cp.status";
+    
+    public EV_Central(int port, String jsonFilePath, String driversJsonFilePath, String kafkaBootstrapServers) {
         this.port = port;
         this.jsonFilePath = jsonFilePath;
+        this.driversJsonFilePath = driversJsonFilePath;
+        this.kafkaBootstrapServers = kafkaBootstrapServers;
         this.allChargingPoints = new Vector<>();
         this.authenticatedCPs = new Vector<>();
+        this.allDrivers = new Vector<>();
+        this.authenticatedDrivers = new Vector<>();
         this.connectedClients = new ConcurrentHashMap<>();
         this.gson = new GsonBuilder().setPrettyPrinting().create();
         this.running = false;
@@ -68,6 +90,35 @@ public class EV_Central {
             System.err.println("   Make sure charging_points.json is in the correct location");
         } catch (Exception e) {
             System.err.println("❌ Error loading JSON: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Load all drivers from JSON file into allDrivers vector
+     */
+    private void loadDriversFromJSON() {
+        System.out.println("📂 Loading drivers from: " + driversJsonFilePath);
+        
+        try (FileReader reader = new FileReader(driversJsonFilePath)) {
+            Type listType = new TypeToken<ArrayList<Driver>>(){}.getType();
+            List<Driver> driverList = gson.fromJson(reader, listType);
+            
+            allDrivers.clear();
+            allDrivers.addAll(driverList);
+            
+            System.out.println("✅ Loaded " + allDrivers.size() + " drivers from JSON:");
+            for (Driver driver : allDrivers) {
+                System.out.printf("   - Driver ID: %s | Name: %s | Email: %s%n",
+                    driver.getId(), driver.getName(), driver.getGmail());
+            }
+            System.out.println();
+            
+        } catch (FileNotFoundException e) {
+            System.err.println("❌ Drivers JSON file not found: " + driversJsonFilePath);
+            System.err.println("   Make sure DR.json is in the correct location");
+        } catch (Exception e) {
+            System.err.println("❌ Error loading drivers JSON: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -123,6 +174,19 @@ public class EV_Central {
     }
     
     /**
+     * Authenticate a driver by ID
+     * Returns the Driver if found in allDrivers, null otherwise
+     */
+    private Driver authenticateDriver(String driverId) {
+        for (Driver driver : allDrivers) {
+            if (driver.getId().equals(driverId)) {
+                return driver;
+            }
+        }
+        return null;
+    }
+    
+    /**
      * Get a charging point by ID
      */
     private ChargingPoint getChargingPointById(String cpId) {
@@ -132,6 +196,253 @@ public class EV_Central {
             }
         }
         return null;
+    }
+    
+    /**
+     * Initialize Kafka producer and consumer
+     */
+    private void initializeKafka() {
+        System.out.println("📡 Initializing Kafka...");
+        
+        // Producer configuration
+        Properties producerProps = new Properties();
+        producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaBootstrapServers);
+        producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        producerProps.put(ProducerConfig.ACKS_CONFIG, "1");
+        kafkaProducer = new KafkaProducer<>(producerProps);
+        
+        // Consumer configuration
+        Properties consumerProps = new Properties();
+        consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaBootstrapServers);
+        consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "central-server");
+        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        kafkaConsumer = new KafkaConsumer<>(consumerProps);
+        
+        // Subscribe to topics
+        kafkaConsumer.subscribe(Arrays.asList(TOPIC_REQUESTS, TOPIC_TELEMETRY, TOPIC_CP_STATUS));
+        
+        System.out.println("✅ Kafka initialized");
+        System.out.println("   Listening on: " + TOPIC_REQUESTS + ", " + TOPIC_TELEMETRY + ", " + TOPIC_CP_STATUS);
+        System.out.println("   Publishing to: " + TOPIC_AUTHORIZATIONS + ", " + TOPIC_NOTIFICATIONS);
+    }
+    
+    /**
+     * Start Kafka consumer thread
+     */
+    private void startKafkaConsumerThread() {
+        kafkaConsumerThread = new Thread(() -> {
+            System.out.println("👂 Kafka consumer thread started\n");
+            
+            while (running) {
+                try {
+                    ConsumerRecords<String, String> records = kafkaConsumer.poll(Duration.ofMillis(1000));
+                    
+                    for (ConsumerRecord<String, String> record : records) {
+                        String message = record.value();
+                        handleKafkaMessage(message, record.topic());
+                    }
+                } catch (Exception e) {
+                    if (running) {
+                        System.err.println("❌ Kafka consumer error: " + e.getMessage());
+                    }
+                }
+            }
+        });
+        kafkaConsumerThread.start();
+    }
+    
+    /**
+     * Handle messages from Kafka
+     */
+    private void handleKafkaMessage(String message, String topic) {
+        String[] parts = message.split("#");
+        
+        if (parts.length < 2) {
+            return;
+        }
+        
+        String command = parts[0];
+        
+        try {
+            if (topic.equals(TOPIC_REQUESTS)) {
+                // Handle charging request from driver
+                handleChargingRequest(parts);
+            } else if (topic.equals(TOPIC_TELEMETRY)) {
+                // Handle telemetry from CP
+                handleTelemetry(parts);
+            } else if (topic.equals(TOPIC_CP_STATUS)) {
+                // Handle status update from CP
+                handleCPStatus(parts);
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Error handling Kafka message: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Handle charging request from driver
+     */
+    private void handleChargingRequest(String[] parts) {
+        if (parts.length < 3) {
+            return;
+        }
+        
+        String driverId = parts[1];
+        String cpId = parts[2];
+        
+        System.out.println("\n📨 CHARGING REQUEST received");
+        System.out.println("   Driver: " + driverId);
+        System.out.println("   Requested CP: " + cpId);
+        
+        // Validate driver
+        Driver driver = authenticateDriver(driverId);
+        if (driver == null) {
+            System.out.println("❌ Driver not found in database");
+            sendNotification(driverId, "AUTH_DENIED#" + driverId + "#Driver not registered");
+            return;
+        }
+        
+        // Validate CP
+        ChargingPoint cp = getChargingPointById(cpId);
+        if (cp == null) {
+            System.out.println("❌ Charging Point not found");
+            sendNotification(driverId, "AUTH_DENIED#" + driverId + "#Charging Point not found");
+            return;
+        }
+        
+        // Check if CP is available
+        if (!"AVAILABLE".equals(cp.getState())) {
+            System.out.println("❌ CP not available. Current state: " + cp.getState());
+            sendNotification(driverId, "AUTH_DENIED#" + driverId + "#CP not available");
+            return;
+        }
+        
+        // Authorization granted
+        System.out.println("✅ Authorization GRANTED");
+        
+        // Send authorization to CP
+        double powerKw = 50.0; // Default power
+        String authMessage = String.format("AUTH#%s#%s#%.2f", cpId, driverId, powerKw);
+        sendToKafka(TOPIC_AUTHORIZATIONS, cpId, authMessage);
+        
+        // Notify driver
+        sendNotification(driverId, "AUTH_SUCCESS#" + driverId + "#" + cpId);
+        
+        System.out.println("📤 Authorization sent to CP-" + cpId + " and Driver-" + driverId);
+    }
+    
+    /**
+     * Handle telemetry from CP
+     */
+    private void handleTelemetry(String[] parts) {
+        String command = parts[0];
+        
+        if (command.equals("START") && parts.length >= 4) {
+            String cpId = parts[1];
+            String driverId = parts[2];
+            double powerKw = Double.parseDouble(parts[3]);
+            
+            System.out.println("⚡ CHARGING STARTED: CP-" + cpId + " → Driver-" + driverId);
+            
+            // Update CP in database
+            ChargingPoint cp = getChargingPointById(cpId);
+            if (cp != null) {
+                cp.setState("CHARGING");
+                cp.setConnectedVehicleId(driverId);
+                cp.setCurrentPowerKw(powerKw);
+                updateChargingPoint(cp);
+            }
+            
+            // Notify driver
+            sendNotification(driverId, "CHARGING_STARTED#" + driverId);
+            
+        } else if (command.equals("TELEMETRY") && parts.length >= 5) {
+            String cpId = parts[1];
+            String driverId = parts[2];
+            double energyKwh = Double.parseDouble(parts[3]);
+            double powerKw = Double.parseDouble(parts[4]);
+            
+            // Update CP in database
+            ChargingPoint cp = getChargingPointById(cpId);
+            if (cp != null) {
+                cp.setTotalEnergySuppliedKwh(energyKwh);
+                double cost = energyKwh * cp.getPriceEurKwh();
+                cp.setCurrentChargingCost(cost);
+                updateChargingPoint(cp);
+                
+                System.out.printf("📊 CP-%s telemetry: %.4f kWh (€%.2f)%n", cpId, energyKwh, cost);
+            }
+            
+        } else if (command.equals("STOP") && parts.length >= 4) {
+            String cpId = parts[1];
+            String driverId = parts[2];
+            double totalEnergyKwh = Double.parseDouble(parts[3]);
+            
+            System.out.println("🛑 CHARGING STOPPED: CP-" + cpId);
+            
+            // Update CP in database
+            ChargingPoint cp = getChargingPointById(cpId);
+            if (cp != null) {
+                double totalCost = totalEnergyKwh * cp.getPriceEurKwh();
+                
+                cp.setState("AVAILABLE");
+                cp.setConnectedVehicleId(null);
+                cp.setCurrentPowerKw(0.0);
+                cp.setTotalEnergySuppliedKwh(0.0);
+                cp.setCurrentChargingCost(0.0);
+                updateChargingPoint(cp);
+                
+                // Send ticket to driver
+                String ticketMsg = String.format("CHARGING_STOPPED#%s#%.4f#%.2f", 
+                    driverId, totalEnergyKwh, totalCost);
+                sendNotification(driverId, ticketMsg);
+                
+                System.out.printf("🎫 Ticket sent to Driver-%s: %.4f kWh, €%.2f%n", 
+                    driverId, totalEnergyKwh, totalCost);
+            }
+        }
+    }
+    
+    /**
+     * Handle status update from CP
+     */
+    private void handleCPStatus(String[] parts) {
+        if (parts.length < 3) {
+            return;
+        }
+        
+        String cpId = parts[1];
+        String status = parts[2];
+        
+        ChargingPoint cp = getChargingPointById(cpId);
+        if (cp != null) {
+            cp.setState(status);
+            updateChargingPoint(cp);
+            System.out.println("📊 CP-" + cpId + " status updated: " + status);
+        }
+    }
+    
+    /**
+     * Send message to Kafka topic
+     */
+    private void sendToKafka(String topic, String key, String message) {
+        try {
+            ProducerRecord<String, String> record = new ProducerRecord<>(topic, key, message);
+            kafkaProducer.send(record);
+        } catch (Exception e) {
+            System.err.println("❌ Error sending to Kafka: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Send notification to driver
+     */
+    private void sendNotification(String driverId, String message) {
+        sendToKafka(TOPIC_NOTIFICATIONS, driverId, message);
     }
     
     /**
@@ -169,27 +480,37 @@ public class EV_Central {
             return;
         }
         
-        // 2. Start server socket
+        // 2. Load drivers from JSON
+        loadDriversFromJSON();
+        
+        if (allDrivers.isEmpty()) {
+            System.err.println("⚠️  Warning: No drivers loaded.");
+        }
+        
+        // 3. Initialize Kafka
+        initializeKafka();
+        
+        // 4. Start Kafka consumer thread
+        startKafkaConsumerThread();
+        
+        // 5. Start server socket
         try {
             serverSocket = new ServerSocket(port);
             running = true;
             System.out.println("🚀 CENTRAL SERVER started on port " + port);
-            System.out.println("⏳ Waiting for Charging Point connections...");
-            System.out.println("===========================================\n");
+            System.out.println("📡 Kafka connected: " + kafkaBootstrapServers);
+            System.out.println("⏳ Waiting for connections...\n");
             
-            // Start auto-save thread (saves every 30 seconds)
+            // Start auto-save thread
             startAutoSaveThread();
             
-            // 3. Accept connections in loop
+            // Accept connections
             while (running) {
                 Socket clientSocket = serverSocket.accept();
                 System.out.println("🔌 New connection from: " + clientSocket.getInetAddress());
-                
-                // Handle each client in a new thread
                 Thread clientThread = new Thread(new ClientHandler(clientSocket));
                 clientThread.start();
             }
-            
         } catch (IOException e) {
             if (running) {
                 System.err.println("❌ Server error: " + e.getMessage());
@@ -204,6 +525,8 @@ public class EV_Central {
         System.out.println("\n========== SYSTEM STATUS ==========");
         System.out.println("Total CPs in Database: " + allChargingPoints.size());
         System.out.println("Authenticated CPs:     " + authenticatedCPs.size());
+        System.out.println("Total Drivers in Database: " + allDrivers.size());
+        System.out.println("Connected Drivers:     " + authenticatedDrivers.size());
         System.out.println("-----------------------------------");
         
         if (!authenticatedCPs.isEmpty()) {
@@ -224,6 +547,15 @@ public class EV_Central {
         } else {
             System.out.println("  (No charging points connected yet)");
         }
+        
+        if (!authenticatedDrivers.isEmpty()) {
+            System.out.println("\nConnected Drivers:");
+            for (Driver driver : authenticatedDrivers) {
+                System.out.printf("  👤 Driver-%s | %s | %s%n", 
+                    driver.getId(), driver.getName(), driver.getGmail());
+            }
+        }
+        
         System.out.println("===================================\n");
     }
     
@@ -240,14 +572,14 @@ public class EV_Central {
     }
     
     /**
-     * Client Handler - handles each connected client
+     * Client Handler - handles each connected client (Socket-based, for CP monitors)
      */
     private class ClientHandler implements Runnable {
         private Socket socket;
         private BufferedReader in;
         private PrintWriter out;
         private String clientId;
-        private ChargingPoint myCP; // Reference to this client's CP
+        private ChargingPoint myCP;
         
         public ClientHandler(Socket socket) {
             this.socket = socket;
@@ -296,7 +628,7 @@ public class EV_Central {
                 }
                 
                 // Authentication SUCCESS
-                myCP = cp; // Keep reference
+                myCP = cp;
                 authenticatedCPs.add(cp);
                 connectedClients.put(clientId, socket);
                 
@@ -350,13 +682,10 @@ public class EV_Central {
                             String vehicleId = parts[1];
                             double powerKw = Double.parseDouble(parts[2]);
                             
-                            // Update to CHARGING state
                             myCP.setState("CHARGING");
                             myCP.setConnectedVehicleId(vehicleId);
                             myCP.setCurrentPowerKw(powerKw);
                             myCP.setLastSeen(new java.util.Date().toString());
-                            
-                            // Save to database
                             updateChargingPoint(myCP);
                             
                             out.println("ACK#Charging started for vehicle: " + vehicleId);
@@ -374,8 +703,6 @@ public class EV_Central {
                             myCP.setTotalEnergySuppliedKwh(energyKwh);
                             myCP.setCurrentChargingCost(cost);
                             myCP.setLastSeen(new java.util.Date().toString());
-                            
-                            // Save to database
                             updateChargingPoint(myCP);
                             
                             out.println("ACK#Updated: " + energyKwh + " kWh, €" + String.format("%.2f", cost));
@@ -389,15 +716,12 @@ public class EV_Central {
                         double finalCost = myCP.getCurrentChargingCost();
                         String vehicleId = myCP.getConnectedVehicleId();
                         
-                        // Update to AVAILABLE state
                         myCP.setState("AVAILABLE");
                         myCP.setConnectedVehicleId(null);
                         myCP.setCurrentPowerKw(0.0);
                         myCP.setTotalEnergySuppliedKwh(0.0);
                         myCP.setCurrentChargingCost(0.0);
                         myCP.setLastSeen(new java.util.Date().toString());
-                        
-                        // Save to database
                         updateChargingPoint(myCP);
                         
                         out.println("ACK#Charging stopped. Total: " + finalEnergy + " kWh, €" + String.format("%.2f", finalCost));
@@ -413,8 +737,6 @@ public class EV_Central {
                             String newState = parts[1];
                             myCP.setState(newState);
                             myCP.setLastSeen(new java.util.Date().toString());
-                            
-                            // Save to database
                             updateChargingPoint(myCP);
                             
                             out.println("ACK#State changed to: " + newState);
@@ -431,8 +753,6 @@ public class EV_Central {
                             myCP.setPosX(newX);
                             myCP.setPosY(newY);
                             myCP.setLastSeen(new java.util.Date().toString());
-                            
-                            // Save to database
                             updateChargingPoint(myCP);
                             
                             out.println("ACK#Position updated to: (" + newX + ", " + newY + ")");
@@ -447,8 +767,6 @@ public class EV_Central {
                             
                             myCP.setPriceEurKwh(newPrice);
                             myCP.setLastSeen(new java.util.Date().toString());
-                            
-                            // Save to database
                             updateChargingPoint(myCP);
                             
                             out.println("ACK#Price updated to: €" + newPrice + "/kWh");
@@ -463,8 +781,6 @@ public class EV_Central {
                             
                             myCP.setStatus(newStatus);
                             myCP.setLastSeen(new java.util.Date().toString());
-                            
-                            // Save to database
                             updateChargingPoint(myCP);
                             
                             out.println("ACK#Status updated to: " + newStatus);
@@ -513,12 +829,19 @@ public class EV_Central {
         
         System.out.println("\n🛑 Shutting down CENTRAL SERVER...");
         
-        // IMPORTANT: Save all data to JSON before closing
+        // Save database
         System.out.println("💾 Saving final state to database...");
         saveChargingPointsToJSON();
         
+        // Close Kafka
+        if (kafkaConsumer != null) {
+            kafkaConsumer.close();
+        }
+        if (kafkaProducer != null) {
+            kafkaProducer.close();
+        }
+        
         try {
-            // Close all client connections
             for (Socket socket : connectedClients.values()) {
                 try {
                     socket.close();
@@ -541,20 +864,19 @@ public class EV_Central {
     }
     
     public static void main(String[] args) {
-        // Check arguments
-        if (args.length < 2) {
-            System.out.println("Usage: java EV.EV_Central <port> <json_file_path>");
-            System.out.println("Example: java EV.EV_Central 5000 charging_points.json");
+        if (args.length < 4) {
+            System.out.println("Usage: java EV.EV_Central <port> <charging_points_json> <drivers_json> <kafka_bootstrap_servers>");
+            System.out.println("Example: java EV.EV_Central 5000 charging_points.json DR.json localhost:9092");
             return;
         }
         
         int port = Integer.parseInt(args[0]);
         String jsonFilePath = args[1];
+        String driversJsonFilePath = args[2];
+        String kafkaServers = args[3];
         
-        // Create and start central server
-        EV_Central central = new EV_Central(port, jsonFilePath);
+        EV_Central central = new EV_Central(port, jsonFilePath, driversJsonFilePath, kafkaServers);
         
-        // Add shutdown hook for graceful shutdown
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("\n🛑 Shutting down server...");
             central.stop();
