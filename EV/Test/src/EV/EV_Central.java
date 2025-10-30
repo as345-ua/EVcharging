@@ -218,7 +218,7 @@ public class EV_Central {
         consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "central-server");
-        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         kafkaConsumer = new KafkaConsumer<>(consumerProps);
         
         // Subscribe to topics
@@ -259,7 +259,7 @@ public class EV_Central {
      */
     private void handleKafkaMessage(String message, String topic) {
         String[] parts = message.split("#");
-        
+        System.out.println("📨 Received Kafka message on topic " + topic + ": " + message);
         if (parts.length < 2) {
             return;
         }
@@ -490,6 +490,8 @@ public class EV_Central {
         // 3. Initialize Kafka
         initializeKafka();
         
+        running = true;
+
         // 4. Start Kafka consumer thread
         startKafkaConsumerThread();
         

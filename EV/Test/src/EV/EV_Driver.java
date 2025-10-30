@@ -57,7 +57,7 @@ public class EV_Driver {
         consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "driver-" + driverId);
-        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         consumer = new KafkaConsumer<>(consumerProps);
         
         // Subscribe to notifications and telemetry
@@ -226,7 +226,7 @@ public class EV_Driver {
         try {
             ProducerRecord<String, String> record = new ProducerRecord<>(TOPIC_REQUESTS, driverId, message);
             producer.send(record);
-            
+            producer.flush();
             System.out.println("\n📤 Charging request sent!");
             System.out.println("   Charging Point: CP-" + cpId);
             System.out.println("   Waiting for authorization...");
@@ -340,19 +340,27 @@ public class EV_Driver {
     /**
      * Stop the driver application
      */
-    public void stop() {
-        running.set(false);
-        
-        if (consumer != null) {
-            consumer.close();
+public void stop() {
+    running.set(false);
+    
+    // First stop the consumer thread
+    if (consumerThread != null && consumerThread.isAlive()) {
+        consumerThread.interrupt();
+        try {
+            consumerThread.join(5000); // Wait up to 5 seconds
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
-        
-        if (producer != null) {
-            producer.close();
-        }
-        
-        System.out.println("🛑 Driver application stopped");
     }
+    
+    // Then close Kafka resources
+    if (consumer != null) {
+        consumer.close();
+    }
+    if (producer != null) {
+        producer.close();
+    }
+}
     
     public static void main(String[] args) {
         if (args.length < 2) {
