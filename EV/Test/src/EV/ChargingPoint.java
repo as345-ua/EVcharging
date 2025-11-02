@@ -31,99 +31,99 @@ public class ChargingPoint implements Serializable {
     }
 
     // Getters and Setters
-    public String getId() { 
-        return id; 
-    }
-    
-    public void setId(String id) { 
-        this.id = id; 
+    public String getId() {
+        return id;
     }
 
-    public String getStatus() { 
-        return status; 
-    }
-    
-    public void setStatus(String status) { 
-        this.status = status; 
+    public void setId(String id) {
+        this.id = id;
     }
 
-    public double getPosX() { 
-        return posX; 
-    }
-    
-    public void setPosX(double posX) { 
-        this.posX = posX; 
+    public String getStatus() {
+        return status;
     }
 
-    public double getPosY() { 
-        return posY; 
-    }
-    
-    public void setPosY(double posY) { 
-        this.posY = posY; 
+    public void setStatus(String status) {
+        this.status = status;
     }
 
-    public double getPriceEurKwh() { 
-        return priceEurKwh; 
-    }
-    
-    public void setPriceEurKwh(double priceEurKwh) { 
-        this.priceEurKwh = priceEurKwh; 
+    public double getPosX() {
+        return posX;
     }
 
-    public String getState() { 
-        return state; 
-    }
-    
-    public void setState(String state) { 
-        this.state = state; 
+    public void setPosX(double posX) {
+        this.posX = posX;
     }
 
-    public String getLastSeen() { 
-        return lastSeen; 
-    }
-    
-    public void setLastSeen(String lastSeen) { 
-        this.lastSeen = lastSeen; 
+    public double getPosY() {
+        return posY;
     }
 
-    public String getConnectedVehicleId() { 
-        return connectedVehicleId; 
-    }
-    
-    public void setConnectedVehicleId(String connectedVehicleId) { 
-        this.connectedVehicleId = connectedVehicleId; 
+    public void setPosY(double posY) {
+        this.posY = posY;
     }
 
-    public double getCurrentPowerKw() { 
-        return currentPowerKw; 
-    }
-    
-    public void setCurrentPowerKw(double currentPowerKw) { 
-        this.currentPowerKw = currentPowerKw; 
+    public double getPriceEurKwh() {
+        return priceEurKwh;
     }
 
-    public double getTotalEnergySuppliedKwh() { 
-        return totalEnergySuppliedKwh; 
-    }
-    
-    public void setTotalEnergySuppliedKwh(double totalEnergySuppliedKwh) { 
-        this.totalEnergySuppliedKwh = totalEnergySuppliedKwh; 
+    public void setPriceEurKwh(double priceEurKwh) {
+        this.priceEurKwh = priceEurKwh;
     }
 
-    public double getCurrentChargingCost() { 
-        return currentChargingCost; 
+    public String getState() {
+        return state;
     }
-    
-    public void setCurrentChargingCost(double currentChargingCost) { 
-        this.currentChargingCost = currentChargingCost; 
+
+    public void setState(String state) {
+        this.state = state;
+    }
+
+    public String getLastSeen() {
+        return lastSeen;
+    }
+
+    public void setLastSeen(String lastSeen) {
+        this.lastSeen = lastSeen;
+    }
+
+    public String getConnectedVehicleId() {
+        return connectedVehicleId;
+    }
+
+    public void setConnectedVehicleId(String connectedVehicleId) {
+        this.connectedVehicleId = connectedVehicleId;
+    }
+
+    public double getCurrentPowerKw() {
+        return currentPowerKw;
+    }
+
+    public void setCurrentPowerKw(double currentPowerKw) {
+        this.currentPowerKw = currentPowerKw;
+    }
+
+    public double getTotalEnergySuppliedKwh() {
+        return totalEnergySuppliedKwh;
+    }
+
+    public void setTotalEnergySuppliedKwh(double totalEnergySuppliedKwh) {
+        this.totalEnergySuppliedKwh = totalEnergySuppliedKwh;
+    }
+
+    public double getCurrentChargingCost() {
+        return currentChargingCost;
+    }
+
+    public void setCurrentChargingCost(double currentChargingCost) {
+        this.currentChargingCost = currentChargingCost;
     }
 
     // Helper method to check if available
     public boolean isAvailable() {
         return "AVAILABLE".equalsIgnoreCase(state);
     }
-    
+
     // Helper method to check if charging
     public boolean isCharging() {
         return "CHARGING".equalsIgnoreCase(state);
@@ -131,8 +131,8 @@ public class ChargingPoint implements Serializable {
 
     @Override
     public String toString() {
-        return String.format("ChargingPoint[id=%s, status=%s, posX=%.1f, posY=%.1f, state=%s, vehicle=%s]", 
-                           id, status, posX, posY, state, connectedVehicleId);
+        return String.format("ChargingPoint[id=%s, status=%s, posX=%.1f, posY=%.1f, state=%s, vehicle=%s]",
+                id, status, posX, posY, state, connectedVehicleId);
     }
 
     @Override

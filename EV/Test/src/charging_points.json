@@ -18,11 +18,12 @@
     "posX": 13.0,
     "posY": 8.0,
     "priceEurKwh": 0.37,
-    "state": "AVAILABLE",
-    "lastSeen": "2025-10-20T11:05:10Z",
-    "currentPowerKw": 0.0,
-    "totalEnergySuppliedKwh": 0.0,
-    "currentChargingCost": 0.0
+    "state": "CHARGING",
+    "lastSeen": "Sun Nov 02 04:31:45 CET 2025",
+    "connectedVehicleId": "1",
+    "currentPowerKw": 50.0,
+    "totalEnergySuppliedKwh": 3.9028,
+    "currentChargingCost": 1.444036
   },
   {
     "id": "3",
@@ -99,13 +100,13 @@
   {
     "id": "9",
     "status": "offline",
-    "posX": 4.4,
-    "posY": 2.2,
-    "priceEurKwh": 0.34,
-    "state": "AVAILABLE",
-    "lastSeen": "2025-10-20T00:05:00Z",
+    "posX": 99.0,
+    "posY": 80.0,
+    "priceEurKwh": 1.0,
+    "state": "DISCONNECTED",
+    "lastSeen": "Sun Nov 02 04:31:40 CET 2025",
     "currentPowerKw": 0.0,
-    "totalEnergySuppliedKwh": 987.9,
+    "totalEnergySuppliedKwh": 0.0,
     "currentChargingCost": 0.0
   },
   {
